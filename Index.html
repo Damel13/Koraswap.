@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>KoraSwap - Échange Crypto/FCFA</title>
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
+  <style>
+    :root {
+      --primary: #6a8cff;
+      --background: #0a0a1a;
+      --surface: #1a1a2e;
+      --error: #ff5555;
+      --text: #e0e0ff;
+    }
+
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: var(--background);
+      color: var(--text);
+      margin: 0;
+      padding: 20px;
+      min-height: 100vh;
+    }
+
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+      background: var(--surface);
+      border-radius: 15px;
+      padding: 25px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+    }
+
+    input, select, button {
+      width: 100%;
+      padding: 12px;
+      border-radius: 8px;
+      margin-bottom: 15px;
+      background: #2a2a4a;
+      border: 1px solid #3a3a5a;
+      color: white;
+    }
+
+    button {
+      background: var(--primary);
+      border: none;
+      font-weight: bold;
+      transition: filter 0.3s;
+    }
+
+    button:hover { filter: brightness(1.2); }
+
+    .footer {
+      text-align: center;
+      padding: 15px;
+      font-size: 0.9em;
+      margin-top: 30px;
+      background-color: #25254a;
+      border-radius: 8px;
+    }
+
+    #authSection {
+      display: none;
+      margin-bottom: 20px;
+    }
+
+    .progress-bar {
+      height: 5px;
+      background: #3a3a5a;
+      border-radius: 3px;
+      overflow: hidden;
+      margin: 15px 0;
+    }
+
+    .progress {
+      width: 0%;
+      height: 100%;
+      background: var(--primary);
+      transition: width 3s ease-in-out;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🌍 KoraSwap</h1>
+
+    <div id="authSection">
+      <input type="email" id="email" placeholder="Email">
+      <input type="password" id="password" placeholder="Mot de passe">
+      <button onclick="login()">Connexion</button>
+      <button onclick="signup()">Créer compte</button>
+    </div>
+
+    <div id="mainSection" style="display: none;">
+      <div class="form-group">
+        <label>Pays</label>
+        <select id="country" onchange="updatePaymentMethods()">
+          <option value="SN">Sénégal</option>
+          <option value="CI">Côte d'Ivoire</option>
+          <option value="BJ">Bénin</option>
+          <option value="BF">Burkina Faso</option>
+          <option value="ML">Mali</option>
+          <option value="TG">Togo</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>Je donne</label>
+        <select id="fromCurrency" onchange="updateUI()">
+          <option value="XOF">FCFA</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>Montant</label>
+        <input type="number" id="amount" placeholder="Entrez le montant">
+      </div>
+
+      <div class="form-group">
+        <label>Je reçois</label>
+        <select id="toCurrency" onchange="updateUI()">
+          <option value="USDT">USDT</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>Opérateur</label>
+        <select id="mobileOperator"></select>
+      </div>
+
+      <div id="addressSection">
+        <label>Adresse de réception</label>
+        <input type="text" id="address" placeholder="Adresse crypto ou numéro">
+      </div>
+
+      <button onclick="initTransaction()">Échanger maintenant</button>
+    </div>
+
+    <div class="footer">
+      <p>🔒 Sécurisé par PayDunya & Firebase</p>
+      <p>📞 Support: <a href="https://wa.me/+23700000000" style="color: var(--primary);">WhatsApp</a></p>
+    </div>
+  </div>
+
+  <script>
+    // Configuration Firebase
+    const firebaseConfig = {
+      apiKey: "AIzaSyAfbEvYjhucEYygSmBVuFVO5CmLAVtwYQE",
+      authDomain: "koraswap.firebaseapp.com",
+      projectId: "koraswap",
+      storageBucket: "koraswap.appspot.com",
+      messagingSenderId: "95497809322",
+      appId: "1:95497809322:web:5cb0bb4fd8fee297d24fd3",
+      measurementId: "G-515312EL2E"
+    };
+
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+    const auth = firebase.auth();
+
+    // Configuration PayDunya
+    const paymentMethods = {
+      SN: { XOF: ['orange', 'wave'], crypto: ['USDT'] },
+      CI: { XOF: ['orange', 'moov'], crypto: ['USDT'] },
+      BJ: { XOF: ['moov', 'mtn'], crypto: ['USDT'] },
+      BF: { XOF: ['orange'], crypto: ['USDT'] },
+      ML: { XOF: ['moov', 'orange'], crypto: ['USDT'] },
+      TG: { XOF: ['t-money', 'moov'], crypto: ['USDT'] }
+    };
+
+    const operatorNames = {
+      orange: 'Orange Money',
+      moov: 'Moov Africa',
+      wave: 'Wave',
+      mtn: 'MTN Mobile Money',
+      't-money': 'T-Money'
+    };
+
+    const cryptoAddresses = {
+      USDT: "TWVxp1tZSVec2M3ebBup2Txn5BW1FNwrNX"
+    };
+
+    const exchangeRates = {
+      XOF_USDT: 600,
+      USDT_XOF: 0.001666
+    };
+
+    // Mise à jour interface
+    function updatePaymentMethods() {
+      const country = document.getElementById('country').value;
+      const operatorSelect = document.getElementById('mobileOperator');
+      
+      operatorSelect.innerHTML = paymentMethods[country].XOF
+        .map(op => `<option value="${op}">${operatorNames[op]}</option>`)
+        .join('');
+    }
+
+    function updateUI() {
+      const toCurrency = document.getElementById('toCurrency').value;
+      const addressInput = document.getElementById('address');
+      
+      if (toCurrency === 'USDT') {
+        addressInput.value = cryptoAddresses[toCurrency];
+        addressInput.readOnly = true;
+      } else {
+        addressInput.readOnly = false;
+        addressInput.value = '';
+      }
+    }
+
+    // Gestion transactions
+    async function initTransaction() {
+      const transactionData = {
+        country: document.getElementById('country').value,
+        operator: document.getElementById('mobileOperator').value,
+        amount: document.getElementById('amount').value,
+        address: document.getElementById('address').value,
+        timestamp: new Date().toISOString()
+      };
+
+      try {
+        await db.collection('transactions').add(transactionData);
+        
+        // Simulation paiement PayDunya
+        const paymentUrl = `https://paydunya.com/pay/${transactionData.amount}`;
+        window.open(paymentUrl, '_blank');
+        
+        alert('Transaction initiée! Vérifiez votre mobile money.');
+      } catch (error) {
+        alert('Erreur: ' + error.message);
+      }
+    }
+
+    // Authentification
+    async function login() {
+      const email = document.getElementById('email').value;
+      const password = document.getElementById('password').value;
+      
+      try {
+        await auth.signInWithEmailAndPassword(email, password);
+        document.getElementById('authSection').style.display = 'none';
+        document.getElementById('mainSection').style.display = 'block';
+      } catch (error) {
+        alert(error.message);
+      }
+    }
+
+    async function signup() {
+      const email = document.getElementById('email').value;
+      const password = document.getElementById('password').value;
+      
+      try {
+        await auth.createUserWithEmailAndPassword(email, password);
+        alert('Compte créé!');
+      } catch (error) {
+        alert(error.message);
+      }
+    }
+
+    // Initialisation
+    auth.onAuthStateChanged(user => {
+      if (user) {
+        document.getElementById('authSection').style.display = 'none';
+        document.getElementById('mainSection').style.display = 'block';
+      }
+    });
+
+    updatePaymentMethods();
+    updateUI();
+  </script>
+</body>
+</html>
